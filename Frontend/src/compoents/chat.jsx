@@ -3,9 +3,11 @@ import React from "react";
 import { useState, useEffect } from "react";
 import { io } from "socket.io-client";
 import socket from "../utils/socket";
+import { X } from "lucide-react";
+
 // const socket = io("http://localhost:5000"); // backend URL
 
-export default function Chat() {
+export default function Chat({setShowChat}) {
   const [message, setMessage] = useState("");
   const [messages, setMessages] = useState([]);
 
@@ -33,10 +35,13 @@ export default function Chat() {
   };
 
   return (
-    <div className="w-80 bg-white shadow-lg flex flex-col">
+    <div className="w-80 bg-white shadow-lg flex flex-col justify-between h-full">
       {/* Chat Header */}
-      <div className="flex items-center space-x-2 justify-end p-4">
-        <span className="text-sm text-gray-500">Chat</span>
+      <div
+        onClick={() => setShowChat(false)}
+        className="flex items-center space-x-2 justify-end p-4 cursor-pointer"
+      >
+        <X className="w-6 h-6 text-gray-600" />
       </div>
 
       {/* Chat Messages */}

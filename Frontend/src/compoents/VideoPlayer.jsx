@@ -1,116 +1,129 @@
+// src/compoents/VideoPlayer.jsx
 import { useEffect, useRef, useImperativeHandle, forwardRef } from "react";
+import { useParams } from "react-router-dom"; // ✅ added
 import socket from "../utils/socket";
 import turnConfig from "../utils/turnConfig";
 import React from "react";
 
-const VideoPlayer = forwardRef(({ localVideoRef, remoteVideoRef, isMuted, isVideoOff }, ref) => {
-  const pcRef = useRef(null);
-  const streamRef = useRef(null);
+const VideoPlayer = forwardRef(
+  ({ localVideoRef, remoteVideoRef, isMuted, isVideoOff }, ref) => {
+    const { meetingId } = useParams(); // ✅ get room ID from URL
+    const pcRef = useRef(null);
+    const streamRef = useRef(null);
 
-  // Mute / Video toggle
-  useEffect(() => {
-    if (localVideoRef.current?.srcObject) {
-      const stream = localVideoRef.current.srcObject;
-      stream.getAudioTracks().forEach(track => (track.enabled = !isMuted));
-      stream.getVideoTracks().forEach(track => (track.enabled = !isVideoOff));
-    }
-  }, [isMuted, isVideoOff, localVideoRef]);
+    // Join room when component mounts
+    useEffect(() => {
+      if (meetingId) {
+        socket.emit("joinRoom", meetingId); // ✅ here I added joinRoom
+      }
+    }, [meetingId]);
 
-  // Setup media & peer connection
-  useEffect(() => {
-    let isMounted = true;
+    // Handle mute/video toggle
+    useEffect(() => {
+      if (localVideoRef.current?.srcObject) {
+        const stream = localVideoRef.current.srcObject;
+        stream.getAudioTracks().forEach((track) => (track.enabled = !isMuted));
+        stream.getVideoTracks().forEach((track) => (track.enabled = !isVideoOff));
+      }
+    }, [isMuted, isVideoOff, localVideoRef]);
 
-    navigator.mediaDevices.getUserMedia({ video: true, audio: true })
-      .then(stream => {
-        if (!isMounted) return;
-        streamRef.current = stream;
+    // Setup media & peer connection
+    useEffect(() => {
+      let isMounted = true;
 
-        if (localVideoRef.current) {
-          localVideoRef.current.srcObject = stream;
+      navigator.mediaDevices
+        .getUserMedia({ video: true, audio: true })
+        .then((stream) => {
+          if (!isMounted) return;
+          streamRef.current = stream;
+
+          if (localVideoRef.current) {
+            localVideoRef.current.srcObject = stream;
+          }
+
+          const pc = new RTCPeerConnection(turnConfig);
+          pcRef.current = pc;
+
+          // Add local tracks
+          stream.getTracks().forEach((track) => pc.addTrack(track, stream));
+
+          // Remote stream
+          pc.ontrack = (event) => {
+            if (remoteVideoRef.current) {
+              remoteVideoRef.current.srcObject = event.streams[0];
+            }
+          };
+
+          // ICE candidate
+          pc.onicecandidate = (event) => {
+            if (event.candidate) socket.emit("ice-candidate", event.candidate);
+          };
+
+          // Signaling
+          socket.on("offer", async (offer) => {
+            await pc.setRemoteDescription(new RTCSessionDescription(offer));
+            const answer = await pc.createAnswer();
+            await pc.setLocalDescription(answer);
+            socket.emit("answer", answer);
+          });
+
+          socket.on("answer", async (answer) => {
+            if (pcRef.current) {
+              await pcRef.current.setRemoteDescription(
+                new RTCSessionDescription(answer)
+              );
+            }
+          });
+
+          socket.on("ice-candidate", async (candidate) => {
+            if (pcRef.current) {
+              try {
+                await pcRef.current.addIceCandidate(
+                  new RTCIceCandidate(candidate)
+                );
+              } catch (e) {
+                console.error("Error adding ICE candidate:", e);
+              }
+            }
+          });
+        })
+        .catch((error) => {
+          console.error("Error accessing media devices:", error);
+        });
+
+      return () => {
+        isMounted = false;
+
+        if (pcRef.current) {
+          pcRef.current.close();
+          pcRef.current = null;
+        }
+        if (streamRef.current) {
+          streamRef.current.getTracks().forEach((track) => track.stop());
         }
 
-        const pc = new RTCPeerConnection(turnConfig);
-        pcRef.current = pc;
+        socket.off("offer");
+        socket.off("answer");
+        socket.off("ice-candidate");
+      };
+    }, [localVideoRef, remoteVideoRef]);
 
-        // Add local tracks
-        stream.getTracks().forEach(track => pc.addTrack(track, stream));
+    // Expose startCall
+    useImperativeHandle(ref, () => ({
+      startCall: async () => {
+        if (!pcRef.current) {
+          console.warn("PeerConnection not ready yet");
+          return;
+        }
+        console.log("Starting call...");
+        const offer = await pcRef.current.createOffer();
+        await pcRef.current.setLocalDescription(offer);
+        socket.emit("offer", offer);
+      },
+    }));
 
-        // Remote stream
-        pc.ontrack = event => {
-          if (remoteVideoRef.current) {
-            remoteVideoRef.current.srcObject = event.streams[0];
-          }
-        };
-
-        // ICE candidate
-        pc.onicecandidate = event => {
-          if (event.candidate) socket.emit("ice-candidate", event.candidate);
-        };
-
-        // Signaling
-        const handleOffer = async offer => {
-          await pc.setRemoteDescription(new RTCSessionDescription(offer));
-          const answer = await pc.createAnswer();
-          await pc.setLocalDescription(answer);
-          socket.emit("answer", answer);
-        };
-
-        const handleAnswer = async answer => {
-          if (pcRef.current) {
-            await pcRef.current.setRemoteDescription(new RTCSessionDescription(answer));
-          }
-        };
-
-        const handleIce = async candidate => {
-          if (pcRef.current) {
-            try {
-              await pcRef.current.addIceCandidate(new RTCIceCandidate(candidate));
-            } catch (e) {
-              console.error("Error adding ICE candidate:", e);
-            }
-          }
-        };
-
-        socket.on("offer", handleOffer);
-        socket.on("answer", handleAnswer);
-        socket.on("ice-candidate", handleIce);
-
-      }).catch(error => {
-        console.error("Error accessing media devices:", error);
-      });
-
-    return () => {
-      isMounted = false;
-
-      if (pcRef.current) {
-        pcRef.current.close();
-        pcRef.current = null;
-      }
-      if (streamRef.current) {
-        streamRef.current.getTracks().forEach(track => track.stop());
-      }
-
-      socket.off("offer");
-      socket.off("answer");
-      socket.off("ice-candidate");
-    };
-  }, [localVideoRef, remoteVideoRef]);
-
-  // Expose startCall to parent
-  useImperativeHandle(ref, () => ({
-    startCall: async () => {
-      if (!pcRef.current) {
-        console.warn("PeerConnection not ready yet");
-        return;
-      }
-      console.log("Starting call...");
-      const offer = await pcRef.current.createOffer();
-      await pcRef.current.setLocalDescription(offer);
-      socket.emit("offer", offer);
-    }
-  }));
-
-  return null; // logic-only component
-});
+    return null; // logic-only component
+  }
+);
 
 export default VideoPlayer;
