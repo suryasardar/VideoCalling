@@ -13,7 +13,7 @@ function App() {
 
         {/* Video Call Page */}
         {/* here I added :meetingId param */}
-        <Route path="/room/:meetingId" element={<VideoCall />} />
+        <Route path="/call/:meetingId" element={<VideoCall />} />
 
       </Routes>
     </Router>
