@@ -4,11 +4,12 @@ import { Server } from "socket.io";
 import cors from "cors";
 
 const app = express();
-app.use(cors());
+app.use(cors({ origin: "*" }));
+
 
 const server = http.createServer(app);
 const io = new Server(server, {
-  cors: { origin: "*", methods: ["GET", "POST"] }
+  cors: { origin: "*", transports: ["websocket", "polling"], }
 });
 
 // Track room hosts and users
@@ -175,5 +176,5 @@ io.on("connection", (socket) => {
   });
 });
 
-const PORT = 5000;
-server.listen(PORT, () => console.log(`Server running on http://localhost:${PORT}`));
+const PORT = process.env.PORT || 5000;
+server.listen(PORT, () => console.log(`Server running on port ${PORT}`));
