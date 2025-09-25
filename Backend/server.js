@@ -106,10 +106,13 @@ io.on("connection", (socket) => {
     const roomId = socket.data?.roomId;
     if (!roomId) return; // only send if user is in a room
     
-    io.to(roomId).emit("receiveMessage", {
+    // Send message to OTHER users in the room (not back to sender)
+    socket.to(roomId).emit("receiveMessage", {
       text: message,
       name: socket.data?.name || "Anonymous",
     });
+    
+    console.log(`Message from ${socket.data?.name} in room ${roomId}: ${message}`);
   });
 
   // Signaling inside room
@@ -126,6 +129,30 @@ io.on("connection", (socket) => {
   socket.on("ice-candidate", (data) => {
     console.log(`Forwarding ICE candidate in room ${data.roomId}`);
     socket.to(data.roomId).emit("ice-candidate", data);
+  });
+
+  // Handle user leaving room
+  socket.on("leaveRoom", ({ roomId, name }) => {
+    console.log(`${name} is leaving room ${roomId}`);
+    
+    // Notify others in the room
+    socket.to(roomId).emit("userLeft", {
+      name: name,
+      socketId: socket.id
+    });
+    
+    // Remove user from room tracking
+    if (rooms[roomId]) {
+      rooms[roomId].users = rooms[roomId].users.filter(id => id !== socket.id);
+    }
+    
+    // Leave the socket room
+    socket.leave(roomId);
+    
+    // Clear user data
+    if (socket.data) {
+      socket.data.roomId = null;
+    }
   });
 
   // Disconnect
